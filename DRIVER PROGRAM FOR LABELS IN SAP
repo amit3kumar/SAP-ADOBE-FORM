@@ -1,0 +1,189 @@
+FUNCTION ZEWN_PRNT_SHPLABEL_PDF.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     REFERENCE(IV_FORM_NAME) TYPE  FPNAME
+*"     REFERENCE(IS_DOC_PARAMS) TYPE  SFPDOCPARAMS OPTIONAL
+*"     REFERENCE(IS_HDDLV_SHPLABEL) TYPE  ZEWM_HDDLV_SHPLABEL_S
+*"     REFERENCE(IS_PRINT) TYPE  /SCWM/S_PRINT OPTIONAL
+*"  EXPORTING
+*"     REFERENCE(EV_STATUS) TYPE  PPFDTSTAT
+*"     REFERENCE(ES_FORM_OUTPUT) TYPE  FPFORMOUTPUT
+*"  CHANGING
+*"     REFERENCE(CS_OUTPUT_PARAMS) TYPE  SFPOUTPUTPARAMS OPTIONAL
+*"  EXCEPTIONS
+*"      ERROR
+*"----------------------------------------------------------------------
+* 02.06.2023 JHAID
+* Druck HU-Versandlabel aus EWM oder ERP
+
+  DATA:
+    lv_function_name TYPE funcname,
+    lv_text          TYPE string.
+
+
+** Output Parmeters filled only for test
+*  cs_output_params-device     = 'PRINTER'.
+*  cs_output_params-connection = 'ADS'.
+*  cs_output_params-adstrlevel = 00.
+*  cs_output_params-bumode     = '-'.
+*  cs_output_params-dest  = 'ZPDF'.
+*  cs_output_params-reqnew  = 'X'.
+*  cs_output_params-spoolid  = 0.
+*  cs_output_params-copies  = 001.
+*  cs_output_params-dataset  = 'PBFORM'.
+*  cs_output_params-suffix2 = sy-uname.
+*  cs_output_params-lifetime = 8.
+*  cs_output_params-pdltype = 'pdf'.
+*  cs_output_params-xdcname = 'acrobat6.xdc'.
+*  cs_output_params-arcmode = '1'.
+*  cs_output_params-nodialog   = 'X'.
+
+* Start pdf printing process
+  TRY.
+      CALL FUNCTION 'FP_FUNCTION_MODULE_NAME'
+        EXPORTING
+          i_name     = iv_form_name
+        IMPORTING
+          e_funcname = lv_function_name.
+
+    CATCH cx_fp_api.
+      MESSAGE e082(/scwm/print)
+         WITH iv_form_name INTO lv_text.
+      ev_status = '2'.
+      RAISE error.
+  ENDTRY.
+
+  CALL FUNCTION 'FP_JOB_OPEN'
+    CHANGING
+      ie_outputparams = cs_output_params
+    EXCEPTIONS
+      cancel          = 1
+      usage_error     = 2
+      system_error    = 3
+      internal_error  = 4
+      OTHERS          = 5.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid
+          TYPE sy-msgty
+        NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+          INTO lv_text.
+    ev_status = '2'.
+    RAISE error.
+  ENDIF.
+
+  CALL FUNCTION lv_function_name
+    EXPORTING
+      /1bcdwb/docparams  = is_doc_params
+      is_hddlv_shplabel  = is_hddlv_shplabel
+      is_print_param     = is_print
+    IMPORTING
+      /1bcdwb/formoutput = es_form_output
+    EXCEPTIONS
+      usage_error        = 1
+      system_error       = 2
+      internal_error     = 3
+      OTHERS             = 4.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid
+          TYPE sy-msgty
+        NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+          INTO lv_text.
+    ev_status = '2'.
+    RAISE error.
+  ENDIF.
+
+  CALL FUNCTION 'FP_JOB_CLOSE'
+    EXCEPTIONS
+      usage_error    = 1
+      system_error   = 2
+      internal_error = 3
+      OTHERS         = 4.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid
+          TYPE sy-msgty
+        NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+          INTO lv_text.
+    ev_status = '2'.
+    RAISE error.
+  ENDIF.
+
+
+ENDFUNCTION.
+
+
+*======================================================================*
+
+*======================================================================*
+* Change history
+* Date | User | CR , changes
+* ----------- --------- ---------------------------------------------
+* dd.mm.20yy <Username> CR nnn : ......
+*======================================================================*
+REPORT zewm_test_print_hulabel.
+
+PARAMETERS: p_form  TYPE fpname OBLIGATORY,
+            p_vbeln TYPE vbeln_vl,
+            p_dest  TYPE rspopname OBLIGATORY.
+
+DATA: gs_hddlv_shplabel TYPE zewm_hddlv_shplabel_s,
+      gs_output_params  TYPE sfpoutputparams.
+
+* Generate Test data:
+IF p_vbeln IS INITIAL.
+  gs_hddlv_shplabel-exidv      = '69055'.
+  gs_hddlv_shplabel-brgew      = 414.
+  gs_hddlv_shplabel-ntgew      = 321.
+  gs_hddlv_shplabel-gewei      = 'KG'.
+  gs_hddlv_shplabel-cntpk      = 1.
+  gs_hddlv_shplabel-anzpk      = 1.
+  gs_hddlv_shplabel-vbeln_vl   = '16700479'.
+  gs_hddlv_shplabel-name1_we   = 'MAHLE BER MÜHLACKER KONSI'.
+  gs_hddlv_shplabel-name2_we   = 'D 75417 MÜHLACKER'.
+  gs_hddlv_shplabel-bstkd      = '5500000112'.
+  gs_hddlv_shplabel-lifnr      = '123456'.
+  gs_hddlv_shplabel-name1_lf   = 'QWERTYUIOIUYTSSDFGHJ'.
+  gs_hddlv_shplabel-name2_lf   = 'D 77855 ACHERN'.
+  gs_hddlv_shplabel-shipid     = '0123456'.
+  gs_hddlv_shplabel-ablad      = '1000'.
+  gs_hddlv_shplabel-eikto      = '2038600'.
+  gs_hddlv_shplabel-matnr      = '1127846'.
+  gs_hddlv_shplabel-maktx      = '4404 13,5 4,5 0,42 599,10'.
+  gs_hddlv_shplabel-kdmat      = 'CN907001'.
+  gs_hddlv_shplabel-vhilm      = ''.
+  gs_hddlv_shplabel-kdmat_pack = '1127846'.
+  gs_hddlv_shplabel-charg      = '8576529'.
+  gs_hddlv_shplabel-menge      = 4860.
+  gs_hddlv_shplabel-meins      = 'ST'.
+  gs_hddlv_shplabel-vers_dat   = 'D210823'.
+  gs_hddlv_shplabel-vers_nr    = '14.5'.
+  gs_hddlv_shplabel-lpn        = '123456781234567890'.
+  gs_hddlv_shplabel-herkl      = 'DE'.
+  gs_hddlv_shplabel-hsdat      = '20230630'.
+ENDIF.
+
+gs_output_params-dest       = p_dest.
+
+CALL FUNCTION 'ZEWN_PRNT_SHPLABEL_PDF'
+  EXPORTING
+    iv_form_name      = p_form
+*   IS_DOC_PARAMS     =
+    is_hddlv_shplabel = gs_hddlv_shplabel
+*   IS_PRINT          =
+* IMPORTING
+*   EV_STATUS         =
+*   ES_FORM_OUTPUT    =
+  CHANGING
+    cs_output_params  = gs_output_params
+  EXCEPTIONS
+    error             = 1
+    OTHERS            = 2.
+IF sy-subrc <> 0.
+* Implement suitable error handling here
+ENDIF.
