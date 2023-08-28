@@ -1,0 +1,21 @@
+var day = Substr(this.parent.EDATU.rawValue, 9, 2)
+var month = Substr(this.parent.EDATU.rawValue, 6, 2)
+var year = Substr(this.parent.EDATU.rawValue, 0, 4)
+var prgrs =  $.parent.PRGRS.rawValue
+var dateValue = this.parent.EDATU.rawValue
+var date = Concat(date,"/",month,"/",year)
+if (prgrs == "2") then
+	var zellerDay = Mod(( day + ( 13 * ( month + 1)) / 5 + year + year / 4 - year / 100 + year / 400) , 7)
+	var dayOfWeek = Mod(zellerDay + 6, 7);
+	var one =   Date2Num(Concat( "01" , "/" , "01" , "/" , year ) , "DD/MM/YYYY");
+  	var target =  Date2Num(Concat( day , "/" , month , "/" , year ) , "DD/MM/YYYY")
+  	var daysInYear = Date2Num(Concat( day , "/" , month , "/" , year ) , "DD/MM/YYYY") - Date2Num(Concat( "01" , "/" , "01" , "/" , year ) , "DD/MM/YYYY") 
+  		var weekno = Floor(((daysInYear + dayOfWeek ) / 7) + 1);
+  		$.rawValue = Concat( weekno , ".", year )
+ 
+elseif (prgrs == "3") then
+  $.rawValue = Concat(month, "/", year);
+else
+  $.presence = "hidden";
+  this.parent.EDATU.presence = "visible";
+endif
