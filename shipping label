@@ -1,0 +1,465 @@
+METHOD   ZIF_EXEC_METHODCALL_PPF~EXECUTE. 
+Data:  e_carrier type /scwm/de_tsp,
+       e_tu type /scwm/tunit,
+       e_first_deliv type /scwm/dlv_header_out_prd_str,
+       gt_odn type table of /scwm/dlv_header_out_prd_str,
+       gt_hu type table of /scwm/tt_huhdr_int,
+       gt_hu_pick type table of /scwm/tt_whohu,
+       gt_hu_item type table of /scwm/tt_huitm_int,
+       gt_odn_item type table of /scwm/dlv_item_out_prd_tab.
+DATA:  lt_shipper type table of adrc,
+       ls_shipper type adrc,
+       lt_shipto type table of adrc,
+       ls_shipto type adrc,
+       addrnumber type char10.
+Data: e_label type zle_struct_ship_label,
+      st_label_shipping type zle_struct_ship_label,
+      wa_but000 type but000,
+      nb_hu type i,
+      dat type d.
+Data: ls_doc_params type SFPDOCPARAMS,
+      lv_function_name tYPE RS38L_FNAM.
+
+"is_doc_params is filled when click on print icon button in pack transaction. 
+     ls_doc_params = is_doc_params.                            
+                                                                
+"it_huhdr_int internal table is filled when click on print icon button.
+      READ TABLE it_huhdr_int  INTO @data(wa_huhdr) INDEX 1.    
+                                                                
+      REFRESH : gt_odn, gt_hu, gt_hu_pick, gt_hu_item, gt_odn_item.
+      CLEAR : e_carrier, e_tu, e_first_deliv.
+
+*We will get (Transport unit number, outbound delivery numbers, carrier name and after different check get HU header and item).  
+      CALL FUNCTION 'ZGET_DATA_FROM_HU'
+        EXPORTING
+          i_hu          = wa_huhdr-huident
+        IMPORTING
+          e_carrier     = e_carrier
+          e_tu          = e_tu
+          e_first_deliv = e_first_deliv
+        TABLES
+          gt_odn        = gt_odn
+          gt_hu         = gt_hu
+          gt_hu_pick    = gt_hu_pick
+          gt_hu_item    = gt_hu_item
+          gt_odn_item   = gt_odn_item.
+
+"Adobe form name
+        iv_form_name =  'ZSHIPPING_LABEL'   
+**********************************************************
+REFRESH lt_shipper, lt_shipto.
+CLEAR : ls_shipto, ls_shipper, e_label, wa_but000, nb_hu.
+
+"shipper address
+READ TABLE gt_odn INTO @data(wa_header) INDEX 1.
+gt_party = wa_header-partyloc.
+
+READ TABLE gt_party INTO @data(wa_party) WITH KEY party_role = 'SO'.
+IF wa_party-addressid IS NOT INITIAL.
+addrnumber = wa_party-addressid.
+ELSE.
+addrnumber = wa_party-addressid_md.
+ENDIF.
+
+SELECT * FROM adrc INTO TABLE lt_shipper WHERE  addrnumber = addrnumber.
+READ TABLE lt_shipper INTO ls_shipper WITH KEY nation = 'E'.
+IF NOT sy-subrc IS INITIAL.
+READ TABLE lt_shipper INTO ls_shipper WITH KEY nation = space.
+ENDIF.
+
+e_label-sender_name1 = ls_shipper-name1.
+e_label-sender_name2 =  ls_shipper-city2.
+concatenate ls_shipper-street ls_shipper-house_num1
+             into e_label-sender_street separated by space.
+
+e_label-sender_street2 = ls_shipper-str_suppl1.
+e_label-sender_postal_code = ls_shipper-post_code1.
+e_label-sender_city = ls_shipper-city1.
+e_label-sender_country = ls_shipper-country.
+
+"shipto address
+READ TABLE gt_party INTO wa_party_ship WITH KEY party_role = 'STPRT'.
+IF wa_party_ship-addressid IS NOT INITIAL.
+addrnumber = wa_party_ship-addressid.
+
+*determine name for shipto
+SELECT * FROM adrc INTO TABLE lt_shipto WHERE  addrnumber = addrnumber.
+READ TABLE lt_shipto INTO ls_shipto WITH KEY nation = 'E'.
+IF NOT sy-subrc IS INITIAL.
+READ TABLE lt_shipto INTO ls_shipto WITH KEY nation = space.
+ENDIF.
+
+
+e_label-rec_name1 = ls_shipto-name1.
+e_label-rec_name2 = ls_shipto-city2.
+e_label-rec_street = ls_shipto-street.
+e_label-rec_street2 = ls_shipto-str_suppl1.
+e_label-rec_postal_code = ls_shipto-post_code1.
+e_label-rec_city = ls_shipto-city1.
+e_label-rec_country = ls_shipto-country.
+
+select single * into wa_but000 from but000
+                            where partner = e_tu-tsp.
+if wa_but000-type = '2'.
+   e_label-carrier_name1 = wa_but000-name_org1.
+   e_label-carrier_name2 = wa_but000-name_org2.
+else.
+   e_label-carrier_name1 = wa_but000-name_first.
+   e_label-carrier_name2 = wa_but000-name_last.
+endif.
+
+e_label-tu_num = e_tu-tu_num.
+call function 'CONVERSION_EXIT_ALPHA_OUTPUT'
+    exporting
+      input  = e_label-tu_num
+    importing
+      output = e_label-tu_num.
+
+concatenate dat+6(2) dat+4(2) dat+0(4) into e_label-ship_date
+separated by '.'.
+
+e_label-hu_weight = wa_huhdr-g_weight.
+e_label-hu_unit   = wa_huhdr-unit_gw.
+
+describe table gt_hu lines nb_hu.
+
+read table gt_hu with  key huident = wa_huhdr-huident.
+if sy-subrc = 0.
+  e_label-zzcurr_nbpacks = sy-tabix.
+endif.
+
+e_label-zztotal_nbpacks = nb_hu.
+
+st_label_shipping = e_label.
+**************************************************************
+CONCATENATE iv_lgnum wa_huhdr-huident INTO xs_output_params-covtitle SEPARATED BY space.
+
+* Start pdf printing process
+      TRY.
+          CALL FUNCTION 'FP_FUNCTION_MODULE_NAME'
+            EXPORTING
+              i_name     = iv_form_name
+            IMPORTING
+              e_funcname = lv_function_name.
+
+        CATCH cx_fp_api INTO lc_fp_api.
+          MESSAGE e082(/scwm/print) WITH iv_form_name INTO mtext.
+          RAISE error.
+      ENDTRY.
+
+*--No print preview needed
+      xs_output_params-nodialog = abap_true.
+
+      CALL FUNCTION 'FP_JOB_OPEN'
+        CHANGING
+          ie_outputparams = xs_output_params
+        EXCEPTIONS
+          cancel          = 1
+          usage_error     = 2
+          system_error    = 3
+          internal_error  = 4
+          OTHERS          = 5.
+
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid
+              TYPE sy-msgty
+            NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+              INTO mtext.
+        RAISE error.
+      ENDIF.
+
+      CALL FUNCTION lv_function_name
+        EXPORTING
+          /1bcdwb/docparams  = ls_doc_params
+          st_label_shipping  = st_label_shipping
+        IMPORTING
+          /1bcdwb/formoutput = es_form_output
+        EXCEPTIONS
+          usage_error        = 1
+          system_error       = 2
+          internal_error     = 3
+          OTHERS             = 4.
+      IF sy-subrc <> 0.
+* Implement suitable error handling here
+      ENDIF.
+
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid
+              TYPE sy-msgty
+            NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+              INTO mtext.
+        RAISE error.
+      ENDIF.
+
+      CALL FUNCTION 'FP_JOB_CLOSE'
+        EXCEPTIONS
+          usage_error    = 1
+          system_error   = 2
+          internal_error = 3
+          OTHERS         = 4.
+
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid
+              TYPE sy-msgty
+            NUMBER sy-msgno
+              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+              INTO mtext.
+
+        RAISE error.
+      ENDIF.
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+FUNCTION zget_data_from_hu.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     REFERENCE(I_HU) TYPE  /SCWM/DE_HUIDENT
+*"     VALUE(I_TAKE_TEXT) TYPE  CHAR1 OPTIONAL
+*"     VALUE(I_ALL_PICKHU) TYPE  CHAR1 OPTIONAL
+*"     REFERENCE(IV_LGNUM) TYPE  /SCWM/LGNUM OPTIONAL
+*"     REFERENCE(IS_HUHDR) TYPE  /SCWM/HUHDR OPTIONAL
+*"  EXPORTING
+*"     VALUE(E_CARRIER) TYPE  /SCWM/DE_TSP
+*"     VALUE(E_TU) TYPE  /SCWM/TUNIT
+*"     VALUE(E_FIRST_DELIV) TYPE  /SCWM/DLV_HEADER_OUT_PRD_STR
+*"  TABLES
+*"      GT_ODN TYPE  /SCWM/DLV_HEADER_OUT_PRD_TAB OPTIONAL
+*"      GT_HU TYPE  /SCWM/TT_HUHDR_INT OPTIONAL
+*"      GT_HU_PICK TYPE  /SCWM/TT_WHOHU OPTIONAL
+*"      GT_HU_ITEM TYPE  /SCWM/TT_HUITM_INT OPTIONAL
+*"      GT_ODN_ITEM TYPE  /SCWM/DLV_ITEM_OUT_PRD_TAB OPTIONAL
+*"      GT_IDENT TYPE  /SCWM/TT_IDENT_INT OPTIONAL
+*"      GT_ODN_ALL_TU TYPE  /SCWM/TT_DOCID OPTIONAL
+*"----------------------------------------------------------------------
+
+  DATA: ls_exclude        TYPE /scwm/dlv_query_excl_str.
+        gt_who TYPE TABLE OF  /scwm/who.
+        wa_who TYPE /scwm/who.
+
+  CLEAR ls_exclude.
+
+  IF is_huhdr-guid_hu IS NOT INITIAL.
+*  perfect select by guid HU
+    SELECT SINGLE * INTO wa_huhdr FROM /scwm/huhdr
+                   WHERE guid_hu = is_huhdr-guid_hu.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+  ELSEIF iv_lgnum IS NOT INITIAL.
+*   not perfect but not Sh... select huidnet and warehouse
+    SELECT SINGLE * INTO wa_huhdr FROM /scwm/huhdr
+              WHERE huident = i_hu
+                AND lgnum   = iv_lgnum.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+  ELSE.
+*   Risk of wrong selection if dupplicate huident in the table
+
+    SELECT SINGLE * INTO wa_huhdr FROM /scwm/huhdr
+                              WHERE huident =  i_hu.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+  ENDIF.       
+
+  CHECK sy-subrc = 0.
+  ls_guid_hu-guid_hu = wa_huhdr-guid_hu.
+  APPEND ls_guid_hu TO it_guid_hu.
+
+  CALL FUNCTION '/SCWM/HU_GT_FILL'
+    EXPORTING
+      iv_appl      = wmegc_huappl_wme
+      it_guid_hu   = it_guid_hu
+    IMPORTING
+      et_huhdr     = et_huhdr
+      et_ident     = et_ident
+      et_reference = et_huref
+      et_tree      = et_hutree
+      et_huitm     = et_huitm
+    EXCEPTIONS
+      error        = 1
+      OTHERS       = 2.
+  IF sy-subrc NE 0.
+    sy-subrc = sy-subrc.
+  ENDIF.
+
+  gt_ident[] = et_ident.
+  gt_hu_item[] = et_huitm.
+
+  REFRESH :   gt_header,gt_item_idn,gt_return,gt_docid,gt_odn[],
+              gt_odn_item[].
+  CLEAR wa_docid.
+
+  LOOP AT  et_huitm INTO wa_huitm.
+    CHECK wa_huitm-qdocid IS NOT INITIAL.
+
+    wa_docid-docid = wa_huitm-qdocid.
+    wa_docid-itemid = wa_huitm-qitmid.
+    wa_docid-doccat = wa_huitm-qdoccat  .
+
+    APPEND wa_docid TO gt_docid.
+    CLEAR wa_docid.
+  ENDLOOP.
+
+  IF i_take_text  IS INITIAL.
+    ls_exclude-head_text     = 'X'.
+    ls_exclude-head_textline = 'X'.
+    ls_exclude-item_text     = 'X'.
+    ls_exclude-item_textline = 'X'.
+  ENDIF.
+
+
+  CALL FUNCTION '/SCWM/WHR_QUERY'
+    EXPORTING
+      it_docid        = gt_docid
+      is_exclude_data = ls_exclude
+    IMPORTING
+      et_whr_headers  = gt_odn[]
+      et_whr_items    = gt_odn_item[]
+      et_return       = gt_return.
+
+
+  CLEAR wa_huitm.
+  READ TABLE et_huitm INTO wa_huitm INDEX 1.
+
+
+  READ TABLE gt_odn INTO wa_header INDEX 1.
+  e_first_deliv = wa_header.
+
+
+* get pick hu
+  REFRESH : gt_ordim_o, gt_hu_pick, gt_who.
+
+  IF gt_odn[] IS NOT INITIAL.
+    SELECT * INTO TABLE gt_ordim_o FROM /scwm/ordim_o
+                      FOR ALL ENTRIES IN gt_odn
+                            WHERE    rdoccat = gt_odn-doccat
+                              AND rdocid = gt_odn-docid.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+  ENDIF.
+
+  DELETE gt_ordim_o WHERE lgnum NE wa_huhdr-lgnum.
+
+  IF gt_ordim_o[] IS NOT INITIAL.
+
+* for Process PPP
+    SELECT * INTO TABLE gt_who FROM /scwm/who
+                      FOR ALL ENTRIES IN gt_ordim_o
+                            WHERE  lgnum = gt_ordim_o-lgnum
+                                 AND who = gt_ordim_o-who.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+
+    LOOP AT gt_who INTO wa_who.
+
+* check process PPP
+      IF wa_who-topwhoid IS NOT INITIAL .
+** PPP
+        SELECT * APPENDING TABLE gt_hu_pick FROM /scwm/whohu
+                                WHERE  lgnum = wa_who-lgnum
+                                     AND who = wa_who-topwhoid.
+        IF sy-subrc NE 0.
+          sy-subrc = sy-subrc.
+        ENDIF.
+      ELSE.
+        SELECT * APPENDING TABLE gt_hu_pick FROM /scwm/whohu
+                                WHERE  lgnum = wa_who-lgnum
+                                     AND who = wa_who-who.
+
+        IF sy-subrc NE 0.
+          sy-subrc = sy-subrc.
+        ENDIF.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDIF.
+
+  SORT   gt_hu_pick BY lgnum huid.
+  DELETE ADJACENT DUPLICATES FROM gt_hu_pick COMPARING lgnum huid.
+
+
+** find tu attached to delivery
+  CLEAR wa_tu_del.
+  SELECT SINGLE * INTO wa_tu_del FROM /scwm/tu_dlv
+                                      WHERE docno = wa_header-docno
+                                      AND doccat = wa_header-doccat.
+  IF sy-subrc NE 0.
+    sy-subrc = sy-subrc.
+  ENDIF.
+*  CHECK sy-subrc = 0.
+  CLEAR wa_unit.
+  SELECT SINGLE * INTO wa_unit FROM /scwm/tunit
+                        WHERE tu_num = wa_tu_del-tu_num.
+  e_tu = wa_unit.
+
+  IF sy-subrc NE 0.
+    sy-subrc = sy-subrc.
+  ENDIF.
+
+* retrieve all hu in TU
+
+  SELECT * INTO TABLE gt_tu_del FROM /scwm/tu_dlv
+                        WHERE tu_num = wa_tu_del-tu_num.
+
+
+  IF sy-subrc NE 0.
+    sy-subrc = sy-subrc.
+  ENDIF.
+
+  SORT gt_tu_del BY top_huident.
+  DELETE ADJACENT DUPLICATES FROM gt_tu_del COMPARING docid. " TOP_HUIDENT.
+*  delete gt_tu_del WHERE TOP_HUIDENT IS INITIAL.
+
+  CLEAR hu_tracking.
+  REFRESH gt_hu.
+  REFRESH lt_docid_read.
+  IF gt_tu_del IS NOT INITIAL.
+
+    LOOP AT  gt_tu_del INTO wa_tu_del.
+
+
+      ls_docid-docid = wa_tu_del-docid.
+
+      APPEND ls_docid TO lt_docid_read.
+      CLEAR ls_docid.
+    ENDLOOP.
+
+    SORT lt_docid_read.
+    DELETE ADJACENT DUPLICATES FROM lt_docid_read.
+
+    CALL FUNCTION '/SCWM/DLV_GET_HUS_FOR_DELIVERY'
+      EXPORTING
+        iv_doccat = wa_tu_del-doccat
+        it_docid  = lt_docid_read
+      IMPORTING
+        et_high   = lt_high
+        et_huref  = lt_huref
+        et_ident  = lt_ident
+        et_huhdr  = lt_huhdr
+        et_huitm  = lt_huitm
+        et_hutree = lt_hutree
+      EXCEPTIONS
+        error     = 1
+        OTHERS    = 2.
+    IF sy-subrc NE 0.
+      sy-subrc = sy-subrc.
+    ENDIF.
+
+
+    gt_hu[]   = lt_huhdr[].
+
+    gt_odn_all_tu[] = lt_docid_read[].
+
+  ENDIF.
+
+ENDFUNCTION.
+
+ENDMETHOD.
